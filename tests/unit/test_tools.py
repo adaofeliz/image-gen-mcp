@@ -1,3 +1,4 @@
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -61,10 +62,10 @@ class TestImageGenerationTool:
 
         # Mock provider registry to skip complex provider logic
         mock_generation_tool.provider_registry.get_supported_models = MagicMock(
-            return_value=["gpt-image-1.5"]
+            return_value=["gpt-image-2"]
         )
         mock_generation_tool._get_default_model = MagicMock(
-            return_value="gpt-image-1.5"
+            return_value="gpt-image-2"
         )
 
         # Use MagicMock for the provider object to mock non-async methods and
@@ -117,10 +118,10 @@ class TestImageGenerationTool:
             return_value="http://localhost:3001/images/test_id.png"
         )
         mock_generation_tool.provider_registry.get_supported_models = MagicMock(
-            return_value=["gpt-image-1.5"]
+            return_value=["gpt-image-2"]
         )
         mock_generation_tool._get_default_model = MagicMock(
-            return_value="gpt-image-1.5"
+            return_value="gpt-image-2"
         )
 
         # Mock provider
@@ -184,10 +185,10 @@ class TestImageGenerationTool:
             return_value="http://localhost:3001/images/test_id.png"
         )
         mock_generation_tool.provider_registry.get_supported_models = MagicMock(
-            return_value=["gpt-image-1.5"]
+            return_value=["gpt-image-2"]
         )
         mock_generation_tool._get_default_model = MagicMock(
-            return_value="gpt-image-1.5"
+            return_value="gpt-image-2"
         )
 
         # Mock provider
@@ -235,10 +236,10 @@ class TestImageGenerationTool:
             return_value="http://localhost:3001/images/test_id.jpeg"
         )
         mock_generation_tool.provider_registry.get_supported_models = MagicMock(
-            return_value=["gpt-image-1.5"]
+            return_value=["gpt-image-2"]
         )
         mock_generation_tool._get_default_model = MagicMock(
-            return_value="gpt-image-1.5"
+            return_value="gpt-image-2"
         )
 
         # Mock provider
@@ -281,10 +282,10 @@ class TestImageGenerationTool:
             return_value=None
         )
         mock_generation_tool.provider_registry.get_supported_models = MagicMock(
-            return_value=["gpt-image-1.5"]
+            return_value=["gpt-image-2"]
         )
         mock_generation_tool._get_default_model = MagicMock(
-            return_value="gpt-image-1.5"
+            return_value="gpt-image-2"
         )
 
         # Mock provider with error
@@ -339,10 +340,10 @@ class TestImageGenerationTool:
             return_value="http://localhost:3001/images/stored_id.png"
         )
         mock_generation_tool.provider_registry.get_supported_models = MagicMock(
-            return_value=["gpt-image-1.5"]
+            return_value=["gpt-image-2"]
         )
         mock_generation_tool._get_default_model = MagicMock(
-            return_value="gpt-image-1.5"
+            return_value="gpt-image-2"
         )
 
         # Mock provider
@@ -635,6 +636,57 @@ class TestImageEditingTool:
 
         assert result["image_id"] == "edited_id"
         storage_manager.save_image.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_edit_invalid_custom_size_normalized_for_cache_and_metadata(
+        self, mock_editing_tool, sample_image_data
+    ):
+        """Invalid custom sizes should be normalized before cache lookup and
+        before building the returned metadata, matching what is actually sent
+        to the OpenAI edits API."""
+        # Prepare mocks
+        sample_b64 = sample_image_data.split(",", 1)[1]
+        captured_cache_params: dict[str, Any] = {}
+
+        async def capture_get(**kwargs):
+            captured_cache_params.update(kwargs)
+            return None
+
+        mock_editing_tool.cache_manager.get_image_edit = AsyncMock(
+            side_effect=capture_get
+        )
+        mock_editing_tool.cache_manager.set_image_edit = AsyncMock()
+        mock_editing_tool.storage_manager.save_image = AsyncMock(
+            return_value=("edited_id", "/path/to/image")
+        )
+        mock_editing_tool._build_image_url = MagicMock(
+            return_value="http://localhost:3001/images/edited_id.png"
+        )
+
+        # spec_set deliberately omits .size so getattr(resp, "size", size)
+        # falls back to the normalized local variable.
+        mock_response = MagicMock(spec_set=["data", "usage", "created"])
+        mock_response.data = [MagicMock(b64_json=sample_b64)]
+        mock_response.usage = None
+        mock_response.created = 1234567890
+        mock_editing_tool.openai_client.edit_image.return_value = mock_response
+
+        result = await mock_editing_tool.edit(
+            image_data=sample_image_data,
+            prompt="oversize test",
+            size="9999x9999",
+        )
+
+        # Cache key reflects the normalized size ("auto"), not "9999x9999"
+        assert captured_cache_params["size"] == "auto"
+
+        # Returned metadata uses the normalized size consistently
+        assert result["metadata"]["size"] == "auto"
+        assert result["metadata"]["dimensions"] == "auto"
+
+        # The call to the underlying client also used the normalized size
+        call_kwargs = mock_editing_tool.openai_client.edit_image.call_args.kwargs
+        assert call_kwargs["size"] == "auto"
 
     def test_missing_openai_provider_configuration(
         self, storage_manager, cache_manager

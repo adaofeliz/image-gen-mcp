@@ -179,8 +179,22 @@ def validate_image_quality(value: Any) -> ImageQuality:
     return normalize_enum_value(value, ImageQuality, ImageQuality.AUTO)
 
 
-def validate_image_size(value: Any) -> ImageSize:
-    """Validate and normalize image size parameter."""
+def validate_image_size(value: Any) -> ImageSize | str:
+    """Validate and normalize image size parameter.
+
+    Raw ``WIDTHxHEIGHT`` strings that don't map to a standard ``ImageSize``
+    are passed through unchanged so providers that support custom sizes
+    (e.g. ``gpt-image-2``) can apply their own constraints downstream.
+    """
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if "x" in normalized:
+            parts = normalized.split("x", 1)
+            if len(parts) == 2 and all(part.isdigit() for part in parts):
+                for member in ImageSize:
+                    if member.value == normalized:
+                        return member
+                return normalized
     return normalize_enum_value(value, ImageSize, ImageSize.LANDSCAPE)
 
 

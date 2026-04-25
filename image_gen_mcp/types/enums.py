@@ -19,6 +19,7 @@ IMAGE_SIZE_DESCRIPTIONS = {
     "1024x1024": "Square format (1:1 ratio)",
     "1536x1024": "Landscape format (3:2 ratio)",
     "1024x1536": "Portrait format (2:3 ratio)",
+    "3840x2160": "4K landscape (16:9 ratio, gpt-image-2 only)",
 }
 
 IMAGE_STYLE_DESCRIPTIONS = {
@@ -79,6 +80,7 @@ class ImageSize(str, Enum):
     SQUARE = "1024x1024"
     LANDSCAPE = "1536x1024"
     PORTRAIT = "1024x1536"
+    ULTRA_HD = "3840x2160"
     AUTO = "auto"
 
     @property

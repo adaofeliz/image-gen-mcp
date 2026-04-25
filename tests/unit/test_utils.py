@@ -125,6 +125,15 @@ class TestSpecificValidators:
         assert validate_image_size("invalid") == ImageSize.LANDSCAPE
         assert validate_image_size(None) == ImageSize.LANDSCAPE
 
+    def test_validate_image_size_passthrough_custom(self):
+        """Raw WxH strings not in the enum are returned unchanged so
+        providers supporting custom sizes (e.g. gpt-image-2) can validate
+        them against their own constraints."""
+        assert validate_image_size("2048x1152") == "2048x1152"
+        assert validate_image_size("  1600X896  ") == "1600x896"
+        # Malformed WxH still falls back to the default enum value
+        assert validate_image_size("axb") == ImageSize.LANDSCAPE
+
     def test_validate_image_style(self):
         """Test image style validation."""
         assert validate_image_style("vivid") == ImageStyle.VIVID
@@ -604,6 +613,145 @@ class TestOpenAIClientManager:
             organization="org-test123",
             max_retries=mock_openai_settings.max_retries,
             timeout=mock_openai_settings.timeout,
+        )
+
+    @pytest.mark.asyncio
+    @patch("image_gen_mcp.utils.openai_client.AsyncOpenAI")
+    async def test_edit_image_normalizes_invalid_custom_size(
+        self, mock_openai_class, mock_openai_settings
+    ):
+        """Invalid custom edit sizes are downgraded to a supported fallback
+        before the request is sent, matching the generation path."""
+        from unittest.mock import AsyncMock
+
+        mock_response = MagicMock()
+        mock_response.data = [MagicMock(b64_json="Zg==")]
+
+        mock_client = MagicMock()
+        mock_client.images.edit = AsyncMock(return_value=mock_response)
+        mock_openai_class.return_value = mock_client
+
+        manager = OpenAIClientManager(mock_openai_settings)
+
+        png_bytes = (
+            b"\x89PNG\r\n\x1a\n"
+            b"\x00\x00\x00\rIHDR"
+            b"\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+            b"\x00\x00\x00\rIDATx\x9cc\xfc\xcf\xc0\x00\x00\x00\x03\x00\x01"
+            b"\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        import base64 as _b64
+        image_b64 = _b64.b64encode(png_bytes).decode()
+
+        await manager.edit_image(
+            image_data=image_b64,
+            prompt="test",
+            model="gpt-image-2",
+            size="9999x9999",
+        )
+
+        sent_size = mock_client.images.edit.call_args.kwargs["size"]
+        assert sent_size == "auto", (
+            f"Invalid custom size should normalize to fallback, got {sent_size!r}"
+        )
+
+    @pytest.mark.asyncio
+    @patch("image_gen_mcp.utils.openai_client.AsyncOpenAI")
+    async def test_generate_image_downgrades_transparent_bg_for_v2(
+        self, mock_openai_class, mock_openai_settings
+    ):
+        """background='transparent' is not natively supported by gpt-image-2.
+        OpenAIClientManager.generate_image must downgrade to 'auto' before
+        the outbound API call, matching OpenAIProvider's behavior."""
+        from unittest.mock import AsyncMock
+
+        mock_response = MagicMock()
+        mock_response.data = [MagicMock(b64_json="Zg==")]
+
+        mock_client = MagicMock()
+        mock_client.images.generate = AsyncMock(return_value=mock_response)
+        mock_openai_class.return_value = mock_client
+
+        manager = OpenAIClientManager(mock_openai_settings)
+
+        await manager.generate_image(
+            prompt="a red circle",
+            model="gpt-image-2",
+            background="transparent",
+        )
+
+        sent_bg = mock_client.images.generate.call_args.kwargs["background"]
+        assert sent_bg == "auto", (
+            f"gpt-image-2 should receive background='auto', got {sent_bg!r}"
+        )
+
+    @pytest.mark.asyncio
+    @patch("image_gen_mcp.utils.openai_client.AsyncOpenAI")
+    async def test_generate_image_preserves_transparent_bg_for_v1_5(
+        self, mock_openai_class, mock_openai_settings
+    ):
+        """gpt-image-1 / gpt-image-1.5 natively support transparent — the
+        downgrade must not fire for them."""
+        from unittest.mock import AsyncMock
+
+        mock_response = MagicMock()
+        mock_response.data = [MagicMock(b64_json="Zg==")]
+
+        mock_client = MagicMock()
+        mock_client.images.generate = AsyncMock(return_value=mock_response)
+        mock_openai_class.return_value = mock_client
+
+        manager = OpenAIClientManager(mock_openai_settings)
+
+        await manager.generate_image(
+            prompt="a red circle",
+            model="gpt-image-1.5",
+            background="transparent",
+        )
+
+        sent_bg = mock_client.images.generate.call_args.kwargs["background"]
+        assert sent_bg == "transparent"
+
+    @pytest.mark.asyncio
+    @patch("image_gen_mcp.utils.openai_client.AsyncOpenAI")
+    async def test_edit_image_downgrades_transparent_bg_for_v2(
+        self, mock_openai_class, mock_openai_settings
+    ):
+        """Same downgrade behavior as generate_image but on the edit path —
+        this is the path ImageEditingTool.edit() actually uses."""
+        from unittest.mock import AsyncMock
+
+        mock_response = MagicMock()
+        mock_response.data = [MagicMock(b64_json="Zg==")]
+
+        mock_client = MagicMock()
+        mock_client.images.edit = AsyncMock(return_value=mock_response)
+        mock_openai_class.return_value = mock_client
+
+        manager = OpenAIClientManager(mock_openai_settings)
+
+        png_bytes = (
+            b"\x89PNG\r\n\x1a\n"
+            b"\x00\x00\x00\rIHDR"
+            b"\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+            b"\x00\x00\x00\rIDATx\x9cc\xfc\xcf\xc0\x00\x00\x00\x03\x00\x01"
+            b"\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        import base64 as _b64
+        image_b64 = _b64.b64encode(png_bytes).decode()
+
+        await manager.edit_image(
+            image_data=image_b64,
+            prompt="make it blue",
+            model="gpt-image-2",
+            background="transparent",
+        )
+
+        sent_bg = mock_client.images.edit.call_args.kwargs["background"]
+        assert sent_bg == "auto", (
+            f"gpt-image-2 edit should receive background='auto', got {sent_bg!r}"
         )
 
     @patch("image_gen_mcp.utils.openai_client.AsyncOpenAI")

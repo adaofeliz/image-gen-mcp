@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document provides a comprehensive technical overview of the Image Gen MCP Server, a Model Context Protocol (MCP) server that integrates OpenAI's gpt-image-1 model for text-to-image generation services.
+This document provides a comprehensive technical overview of the Image Gen MCP Server, a Model Context Protocol (MCP) server that integrates OpenAI's gpt-image family (gpt-image-2, gpt-image-1.5, gpt-image-1), DALL-E, and Google's Imagen series for text-to-image generation and editing services.
 
 ## Architecture
 
@@ -93,9 +93,9 @@ redis  # Optional caching backend
 
 ### OpenAI Images API Integration
 
-#### Model: gpt-image-1
+#### Models: gpt-image-2 / gpt-image-1.5 / gpt-image-1
 
-The server integrates with OpenAI's latest image generation model using the correct Images API endpoints:
+The server integrates with OpenAI's image generation models using the Images API endpoints. `gpt-image-2` is the current default — it adds flexible sizing (any `WxH` where both edges are multiples of 16, max edge 3840px, aspect ≤3:1), supports 4K output (`3840x2160`), and is cheaper than gpt-image-1.5 ($30 vs $32 per 1M image output tokens).
 
 #### 1. Image Generation Endpoint
 
@@ -722,7 +722,7 @@ PROVIDERS__GEMINI__DEFAULT_MODEL=imagen-4
 # =============================================================================
 # Image Generation Settings
 # =============================================================================
-IMAGES__DEFAULT_MODEL=gpt-image-1
+IMAGES__DEFAULT_MODEL=gpt-image-2
 IMAGES__DEFAULT_QUALITY=auto
 IMAGES__DEFAULT_SIZE=1536x1024
 IMAGES__DEFAULT_STYLE=vivid

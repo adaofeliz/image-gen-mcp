@@ -57,6 +57,8 @@ class ModelCapability:
     supports_style: bool = False
     supports_background: bool = False
     supports_compression: bool = False
+    supports_custom_sizes: bool = False
+    size_constraints: dict[str, Any] | None = None
     custom_parameters: dict[str, Any] = field(default_factory=dict)
 
 
@@ -142,7 +144,11 @@ class LLMProvider(ABC):
             )
 
         # Validate size parameter
-        if "size" in params and params["size"] not in capabilities.supported_sizes:
+        if (
+            "size" in params
+            and params["size"] not in capabilities.supported_sizes
+            and not capabilities.supports_custom_sizes
+        ):
             self._logger.warning(
                 f"Size '{params['size']}' not in supported sizes "
                 f"{capabilities.supported_sizes} for model {model}. "

@@ -275,8 +275,14 @@ class ImageGenerationTool:
                 n=1,
             )
 
-            # Estimate cost
-            cost_info = provider.estimate_cost(target_model, prompt, 1)
+            # Estimate cost (quality/size-aware for gpt-image-2)
+            cost_info = provider.estimate_cost(
+                target_model,
+                prompt,
+                1,
+                quality=validated_params.get("quality", quality_str),
+                size=validated_params.get("size", size_str),
+            )
 
             # Prepare metadata
             metadata = {

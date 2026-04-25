@@ -1,5 +1,6 @@
 """Configuration settings for the Image Gen MCP Server."""
 
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -133,12 +134,17 @@ class ProvidersSettings(BaseModel):
 class ImageSettings(BaseModel):
     """Image generation default settings."""
 
-    default_model: str = Field("gpt-image-1.5", description="Default image model")
+    default_model: str = Field("gpt-image-2", description="Default image model")
     default_quality: Literal["auto", "high", "medium", "low"] = Field(
         "auto", description="Default quality"
     )
-    default_size: Literal["1024x1024", "1536x1024", "1024x1536", "auto"] = Field(
-        "1536x1024", description="Default size"
+    default_size: str = Field(
+        "1536x1024",
+        description=(
+            "Default image size. Accepts 'auto', presets like '1024x1024' / "
+            "'1536x1024' / '1024x1536' / '3840x2160', or any 'WxH' supported "
+            "by the configured model (validated at request time)."
+        ),
     )
     default_style: Literal["vivid", "natural"] = Field(
         "vivid", description="Default style"
@@ -158,6 +164,33 @@ class ImageSettings(BaseModel):
             "Base URL for image hosting (for nginx/CDN), if None uses MCP server host"
         ),
     )
+
+    @field_validator("default_size")
+    @classmethod
+    def _validate_default_size(cls, v: str) -> str:
+        """Reject malformed sizes at startup.
+
+        Accepts 'auto' or a well-formed 'WxH' string (two positive integers
+        separated by 'x'). Model-specific constraints (multiples of 16,
+        aspect ratio, pixel count) are enforced by the provider at request
+        time so custom sizes for gpt-image-2 still flow through.
+        """
+        if not isinstance(v, str):
+            raise ValueError("default_size must be a string")
+        normalized = v.strip().lower()
+        if normalized == "auto":
+            return normalized
+        if not re.fullmatch(r"\d+x\d+", normalized):
+            raise ValueError(
+                f"default_size must be 'auto' or 'WxH' "
+                f"(e.g. '1024x1024', '2048x1152'); got {v!r}"
+            )
+        w, h = (int(p) for p in normalized.split("x"))
+        if w <= 0 or h <= 0:
+            raise ValueError(
+                f"default_size dimensions must be positive; got {v!r}"
+            )
+        return normalized
 
 
 class StorageSettings(BaseModel):

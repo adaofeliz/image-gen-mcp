@@ -138,6 +138,7 @@ class TestModelRegistry:
         assert len(models) > 0
         assert "gpt-image-1" in models
         assert "gpt-image-1.5" in models
+        assert "gpt-image-2" in models
 
     @pytest.mark.asyncio
     async def test_get_model_info(self):
@@ -150,6 +151,15 @@ class TestModelRegistry:
         assert model_info.version
         assert model_info.capabilities
         assert isinstance(model_info.capabilities, list)
+
+    @pytest.mark.asyncio
+    async def test_get_model_info_gpt_image_2(self):
+        """Test getting gpt-image-2 model info including 4K size support."""
+        model_info = await model_registry.get_model_info("gpt-image-2")
+
+        assert model_info is not None
+        assert model_info.model_id == "gpt-image-2"
+        assert any("3840x2160" in size for size in model_info.size_options)
 
     @pytest.mark.asyncio
     async def test_get_model_info_nonexistent(self):

@@ -4,7 +4,7 @@
 
 Traditional AI chatbot interfaces are limited to text-only interactions, regardless of how powerful their underlying language models are. Image Gen MCP Server bridges this gap by enabling **any LLM-powered chatbot client** to generate professional-quality images through the standardized Model Context Protocol (MCP).
 
-Whether you're using Claude Desktop, a custom ChatGPT interface, Llama-based applications, or any other LLM client that supports MCP, this server democratizes access to **multiple AI image generation models** including OpenAI's gpt-image-1, dall-e-3, dall-e-2, and Google's Imagen series (imagen-4, imagen-4-ultra, imagen-3), transforming text-only conversations into rich, visual experiences.
+Whether you're using Claude Desktop, a custom ChatGPT interface, Llama-based applications, or any other LLM client that supports MCP, this server democratizes access to **multiple AI image generation models** including OpenAI's gpt-image-2, gpt-image-1.5, gpt-image-1, dall-e-3, dall-e-2, and Google's Imagen series (imagen-4, imagen-4-ultra, imagen-4-fast, imagen-3), transforming text-only conversations into rich, visual experiences.
 
 > **📦 Package Manager**: This project uses [UV](https://docs.astral.sh/uv/) for fast, reliable Python package management. UV provides better dependency resolution, faster installs, and proper environment isolation compared to traditional pip/venv workflows.
 
@@ -71,7 +71,7 @@ The AI ecosystem has evolved to include powerful language models from multiple p
 ## Features
 
 ### 🎨 Multi-Provider Image Generation
-- **Multiple AI Models**: Support for OpenAI (gpt-image-1, dall-e-3, dall-e-2) and Google Gemini (imagen-4, imagen-4-ultra, imagen-3)
+- **Multiple AI Models**: Support for OpenAI (gpt-image-2, gpt-image-1.5, gpt-image-1, dall-e-3, dall-e-2) and Google Gemini (imagen-4, imagen-4-ultra, imagen-4-fast, imagen-3)
 - **Text-to-Image**: Generate high-quality images from text descriptions
 - **Image Editing**: Edit existing images with text instructions (OpenAI models)
 - **Multiple Formats**: Support for PNG, JPEG, and WebP output formats
@@ -190,7 +190,7 @@ uv run python -m image_gen_mcp.server --transport streamable-http --cors
 ```bash
 uv run python -m image_gen_mcp.server --help
 
-Image Gen MCP Server - Generate and edit images using OpenAI's gpt-image-1 model
+Image Gen MCP Server - Generate and edit images using OpenAI's gpt-image models and Google's Imagen series
 
 options:
   --config PATH         Path to configuration file (.env format)
@@ -331,9 +331,9 @@ Generate images from text descriptions using any supported model.
 
 **Parameters**:
 - `prompt` (required): Text description of desired image
-- `model` (optional): Model to use (e.g., "gpt-image-1", "dall-e-3", "imagen-4")
+- `model` (optional): Model to use (e.g., "gpt-image-2", "gpt-image-1.5", "dall-e-3", "imagen-4")
 - `quality`: "auto" | "high" | "medium" | "low" (default: "auto")
-- `size`: "1024x1024" | "1536x1024" | "1024x1536" (default: "1536x1024")
+- `size`: "auto", presets like "1024x1024" / "1536x1024" / "1024x1536" / "3840x2160", or (for `gpt-image-2`) any `WxH` within the model's constraints (default: "1536x1024"). Accepted values are model-dependent.
 - `style`: "vivid" | "natural" (default: "vivid")
 - `output_format`: "png" | "jpeg" | "webp" (default: "png")
 - `background`: "auto" | "transparent" | "opaque" (default: "auto")
@@ -354,7 +354,7 @@ Edit existing images with text instructions.
 - `generated-images://{image_id}` - Access specific generated images
 - `image-history://recent` - Browse recent generation history
 - `storage-stats://overview` - Storage usage and statistics
-- `model-info://gpt-image-1` - Model capabilities and pricing
+- `model-info://gpt-image-2` - Model capabilities and pricing (also available for gpt-image-1.5, gpt-image-1, dall-e-3, dall-e-2)
 
 ## Prompt Templates
 
@@ -404,7 +404,7 @@ PROVIDERS__GEMINI__DEFAULT_MODEL=imagen-4
 # =============================================================================
 # Image Generation Settings
 # =============================================================================
-IMAGES__DEFAULT_MODEL=gpt-image-1
+IMAGES__DEFAULT_MODEL=gpt-image-2
 IMAGES__DEFAULT_QUALITY=auto
 IMAGES__DEFAULT_SIZE=1536x1024
 IMAGES__DEFAULT_STYLE=vivid
@@ -620,7 +620,7 @@ For issues and questions:
 
 ---
 
-**Built with ❤️ using the Model Context Protocol and OpenAI's gpt-image-1**
+**Built with ❤️ using the Model Context Protocol and OpenAI's gpt-image-2**
 
 ## The Future of AI Integration
 

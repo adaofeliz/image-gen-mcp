@@ -8,6 +8,11 @@ from openai import AsyncOpenAI
 from openai.types.images_response import ImagesResponse
 
 from ..config.settings import OpenAISettings
+from ..providers.openai import (
+    GPT_IMAGE_TOKEN_PRICING,
+    OpenAIProvider,
+    _gpt_image_2_tokens_per_image,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +43,7 @@ class OpenAIClientManager:
     async def generate_image(
         self,
         prompt: str,
-        model: str = "gpt-image-1.5",
+        model: str = "gpt-image-2",
         quality: str = "auto",
         size: str = "1536x1024",
         style: str = "vivid",
@@ -65,7 +70,12 @@ class OpenAIClientManager:
                 {
                     "style": style,
                     "output_format": output_format,
-                    "background": background,
+                    # Downgrade model-incompatible background values
+                    # (e.g. transparent on gpt-image-2) via the same
+                    # resolver used by OpenAIProvider.
+                    "background": OpenAIProvider._resolve_background(
+                        background, model
+                    ),
                 }
             )
 
@@ -90,7 +100,7 @@ class OpenAIClientManager:
         image_data: str | bytes,
         prompt: str,
         mask_data: str | bytes | None = None,
-        model: str = "gpt-image-1.5",
+        model: str = "gpt-image-2",
         quality: str = "auto",
         size: str = "1536x1024",
         output_format: str = "png",
@@ -109,7 +119,13 @@ class OpenAIClientManager:
         if mask_data:
             _, _, mask_file = prepare_image_upload(mask_data)
 
-        # The /v1/images/edits endpoint supports gpt-image-1.5, gpt-image-1, dall-e-2.
+        # Normalize size against the model's capabilities so invalid custom
+        # sizes (e.g. "9999x9999") fall back locally instead of failing at
+        # the remote API.
+        capabilities = OpenAIProvider.SUPPORTED_MODELS.get(model)
+        if capabilities is not None:
+            size = OpenAIProvider._resolve_size(size, capabilities, model)
+
         request_params = {
             "model": model,
             "image": image_file,
@@ -125,7 +141,11 @@ class OpenAIClientManager:
         if model.startswith("gpt-image-"):
             request_params["quality"] = quality
             request_params["output_format"] = output_format
-            request_params["background"] = background
+            # Same background downgrade as generate_image / OpenAIProvider
+            # so transparent on gpt-image-2 never hits the real API.
+            request_params["background"] = OpenAIProvider._resolve_background(
+                background, model
+            )
             if output_format in ["jpeg", "webp"] and compression < 100:
                 request_params["output_compression"] = compression
 
@@ -144,24 +164,63 @@ class OpenAIClientManager:
             logger.error(f"Error editing image: {e}")
             raise
 
-    def estimate_cost(self, prompt: str, image_count: int = 1) -> dict[str, Any]:
-        """Estimate the cost of image generation."""
+    def estimate_cost(
+        self,
+        prompt: str,
+        image_count: int = 1,
+        model: str = "gpt-image-2",
+        quality: str = "auto",
+        size: str = "1024x1024",
+    ) -> dict[str, Any]:
+        """Estimate the cost of image generation.
+
+        For gpt-image-2 the per-image token count is approximated by
+        quality tier scaled to pixel count (see OpenAIProvider). Results
+        are rough — use OpenAIProvider.estimate_cost on the active
+        provider instance for the authoritative per-model breakdown.
+        """
+
+        pricing = GPT_IMAGE_TOKEN_PRICING.get(model)
+        if pricing is None:
+            # Non-gpt-image models (e.g. dall-e-*) use per-image pricing that
+            # this helper doesn't know about. Return a zero estimate rather
+            # than silently reporting gpt-image-2 rates, and log so callers
+            # notice. For accurate per-model cost data, use
+            # OpenAIProvider.estimate_cost.
+            logger.warning(
+                "estimate_cost called with unsupported model %r; "
+                "returning zero cost. Use OpenAIProvider.estimate_cost for "
+                "non-gpt-image models.",
+                model,
+            )
+            return {
+                "estimated_cost_usd": 0.0,
+                "text_input_tokens": 0,
+                "image_output_tokens": 0,
+                "breakdown": {
+                    "text_input_cost": 0.0,
+                    "image_output_cost": 0.0,
+                },
+            }
+        if model == "gpt-image-2":
+            tokens_per_image = _gpt_image_2_tokens_per_image(quality, size)
+        else:
+            tokens_per_image = pricing["tokens_per_image"]
 
         # Rough token estimation (actual tokenization may vary)
-        text_tokens = len(prompt.split()) * 1.3  # Rough approximation
-
-        # gpt-image-1.5 pricing (20% cheaper than gpt-image-1)
-        text_input_cost = (text_tokens / 1_000_000) * 4.0  # $4 per 1M tokens
+        text_tokens = len(prompt.split()) * 1.3
+        text_input_cost = (
+            text_tokens / 1_000_000
+        ) * pricing["text_input_per_1m_tokens"]
         image_output_cost = (
-            image_count * 1750 / 1_000_000
-        ) * 32.0  # ~1750 tokens per image, $32 per 1M
-
+            image_count * tokens_per_image / 1_000_000
+        ) * pricing["image_output_per_1m_tokens"]
         total_cost = text_input_cost + image_output_cost
 
         return {
             "estimated_cost_usd": round(total_cost, 4),
             "text_input_tokens": int(text_tokens),
-            "image_output_tokens": 1750 * image_count,
+            "image_output_tokens": int(tokens_per_image * image_count),
             "breakdown": {
                 "text_input_cost": round(text_input_cost, 4),
                 "image_output_cost": round(image_output_cost, 4),

@@ -7,7 +7,9 @@ This guide covers the OpenAI Images API integration used by the Image Gen MCP Se
 ## Quick Reference
 
 The Image Gen MCP Server supports the following OpenAI models:
-- **gpt-image-1**: Latest image generation model with advanced features
+- **gpt-image-2**: Current flagship — flexible sizing up to 4K (3840x2160), $30/1M image output tokens
+- **gpt-image-1.5**: Previous flagship with fixed preset sizes
+- **gpt-image-1**: Original gpt-image model
 - **dall-e-3**: High-quality creative image generation
 - **dall-e-2**: Standard image generation with editing capabilities
 
@@ -21,15 +23,15 @@ Creates an image given a prompt. [Learn more](https://platform.openai.com/docs/g
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `prompt` | string | Yes | Text description of the desired image(s). Max 32000 characters for `gpt-image-1`, 1000 for `dall-e-2`, 4000 for `dall-e-3` |
-| `model` | string | No | Model to use: `gpt-image-1`, `dall-e-3`, or `dall-e-2` (default) |
-| `n` | integer | No | Number of images (1-10). For `dall-e-3`, only `n=1` is supported |
-| `size` | string | No | Image size. For `gpt-image-1`: `1024x1024`, `1536x1024`, `1024x1536`, or `auto` |
-| `quality` | string | No | Image quality. For `gpt-image-1`: `auto`, `high`, `medium`, `low` |
+| `prompt` | string | Yes | Text description of the desired image(s). Max 32,000 chars for `gpt-image-*`, 1,000 for `dall-e-2`, 4,000 for `dall-e-3` |
+| `model` | string | No | Model to use: `gpt-image-2` (default), `gpt-image-1.5`, `gpt-image-1`, `dall-e-3`, or `dall-e-2` |
+| `n` | integer | No | Number of images. `gpt-image-*` and `dall-e-3`: `n=1` only. `dall-e-2`: up to 10 |
+| `size` | string | No | Image size. `gpt-image-1` / `gpt-image-1.5`: `1024x1024`, `1536x1024`, `1024x1536`, or `auto`. `gpt-image-2`: presets plus `3840x2160` and any `WxH` (multiples of 16, max edge 3840, aspect ≤3:1, 655,360–8,294,400 pixels) |
+| `quality` | string | No | Image quality. `gpt-image-*`: `auto`, `high`, `medium`, `low`. `dall-e-3`: `hd` or `standard` |
 | `style` | string | No | Style for `dall-e-3`: `vivid` or `natural` |
-| `output_format` | string | No | Format for `gpt-image-1`: `png`, `jpeg`, or `webp` |
-| `background` | string | No | Background for `gpt-image-1`: `transparent`, `opaque`, or `auto` |
-| `moderation` | string | No | Moderation level for `gpt-image-1`: `auto` or `low` |
+| `output_format` | string | No | Format for `gpt-image-*`: `png`, `jpeg`, or `webp` |
+| `background` | string | No | Background. `gpt-image-1` / `gpt-image-1.5`: `transparent`, `opaque`, `auto`. `gpt-image-2`: accepts the same values, but `transparent` is auto-downgraded to `auto` since gpt-image-2 has no native transparency support |
+| `moderation` | string | No | Moderation level for `gpt-image-*`: `auto` or `low` |
 
 ### Example Request
 
@@ -38,7 +40,7 @@ curl https://api.openai.com/v1/images/generations \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $PROVIDERS__OPENAI__API_KEY" \
   -d '{
-    "model": "gpt-image-1",
+    "model": "gpt-image-2",
     "prompt": "A cute baby sea otter",
     "n": 1,
     "size": "1024x1024"
@@ -53,7 +55,7 @@ from openai import OpenAI
 client = OpenAI()
 
 img = client.images.generate(
-    model="gpt-image-1",
+    model="gpt-image-2",
     prompt="A cute baby sea otter",
     n=1,
     size="1024x1024"
@@ -68,15 +70,15 @@ with open("output.png", "wb") as f:
 
 **Endpoint**: `POST https://api.openai.com/v1/images/edits`
 
-Creates an edited or extended image given source images and a prompt. Only supports `gpt-image-1` and `dall-e-2`.
+Creates an edited or extended image given source images and a prompt. Supports `gpt-image-*` (recommend `gpt-image-2`) and `dall-e-2`.
 
 ### Request Body
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `image` | file/array | Yes | Image(s) to edit. For `gpt-image-1`: up to 16 images, PNG/WEBP/JPG < 50MB |
-| `prompt` | string | Yes | Edit instructions. Max 32000 characters for `gpt-image-1`, 1000 for `dall-e-2` |
-| `model` | string | No | Model to use: `gpt-image-1` or `dall-e-2` (default) |
+| `image` | file/array | Yes | Image(s) to edit. For `gpt-image-*`: up to 16 images, PNG/WEBP/JPG < 50MB |
+| `prompt` | string | Yes | Edit instructions. Max 32,000 chars for `gpt-image-*`, 1,000 for `dall-e-2` |
+| `model` | string | No | Model to use: `gpt-image-2` (default), `gpt-image-1.5`, `gpt-image-1`, or `dall-e-2` |
 | `mask` | file | No | PNG mask file indicating areas to edit |
 | `n` | integer | No | Number of images to generate (1-10) |
 
@@ -85,7 +87,7 @@ Creates an edited or extended image given source images and a prompt. Only suppo
 ```bash
 curl -X POST "https://api.openai.com/v1/images/edits" \
   -H "Authorization: Bearer $PROVIDERS__OPENAI__API_KEY" \
-  -F "model=gpt-image-1" \
+  -F "model=gpt-image-2" \
   -F "image[]=@body-lotion.png" \
   -F "image[]=@bath-bomb.png" \
   -F 'prompt=Create a lovely gift basket with these items'
@@ -109,7 +111,7 @@ PROVIDERS__OPENAI__ENABLED=true
 # Generate with OpenAI model
 result = await session.call_tool("generate_image", {
     "prompt": "A beautiful sunset over mountains",
-    "model": "gpt-image-1",
+    "model": "gpt-image-2",
     "quality": "high",
     "size": "1536x1024"
 })
@@ -122,7 +124,7 @@ result = await session.call_tool("generate_image", {
 result = await session.call_tool("edit_image", {
     "image_data": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA...",
     "prompt": "Add a rainbow to the sky",
-    "model": "gpt-image-1"
+    "model": "gpt-image-2"
 })
 ```
 
@@ -130,6 +132,8 @@ result = await session.call_tool("edit_image", {
 
 | Model | Generation | Editing | Max Prompt | Sizes | Quality Options |
 |-------|------------|---------|------------|-------|----------------|
+| gpt-image-2 | ✅ | ✅ | 32,000 chars | Presets + any WxH (mult-of-16, max edge 3840, aspect ≤3:1) | auto, high, medium, low |
+| gpt-image-1.5 | ✅ | ✅ | 32,000 chars | 1024x1024, 1536x1024, 1024x1536 | auto, high, medium, low |
 | gpt-image-1 | ✅ | ✅ | 32,000 chars | 1024x1024, 1536x1024, 1024x1536 | auto, high, medium, low |
 | dall-e-3 | ✅ | ❌ | 4,000 chars | 1024x1024, 1792x1024, 1024x1792 | hd, standard |
 | dall-e-2 | ✅ | ✅ | 1,000 chars | 256x256, 512x512, 1024x1024 | standard |
@@ -163,7 +167,7 @@ Common error codes:
 ## Best Practices
 
 1. **Model Selection**: 
-   - Use `gpt-image-1` for best quality and features
+   - Use `gpt-image-2` for best quality, flexible sizing (incl. 4K), and lowest per-image cost
    - Use `dall-e-3` for creative, artistic images
    - Use `dall-e-2` for simple images or editing
 

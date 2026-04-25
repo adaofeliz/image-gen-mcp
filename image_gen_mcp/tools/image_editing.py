@@ -6,6 +6,7 @@ import uuid
 from typing import Any
 
 from ..config.settings import Settings
+from ..providers.openai import OpenAIProvider
 from ..storage.manager import ImageStorageManager
 from ..utils.cache import CacheManager
 from ..utils.path_utils import build_image_url_path
@@ -119,6 +120,14 @@ class ImageEditingTool:
         # Generate task ID for tracking
         task_id = str(uuid.uuid4())
 
+        # Normalize size against the model's capabilities so the cache key and
+        # persisted metadata reflect what will actually be sent to the API
+        # (invalid custom sizes fall back to the supported default).
+        model = self.settings.images.default_model
+        capabilities = OpenAIProvider.SUPPORTED_MODELS.get(model)
+        if capabilities is not None:
+            size = OpenAIProvider._resolve_size(size, capabilities, model)
+
         # Check cache first (using hash of image data)
         cache_params = {
             "image_data": image_data,
@@ -129,7 +138,7 @@ class ImageEditingTool:
             "output_format": output_format,
             "compression": compression,
             "background": background,
-            "model": self.settings.images.default_model,
+            "model": model,
         }
 
         cached_result = await self.cache_manager.get_image_edit(**cache_params)
@@ -164,8 +173,14 @@ class ImageEditingTool:
             # Decode base64 image data
             image_bytes = base64.b64decode(edited_image_data.b64_json)
 
-            # Estimate cost
-            cost_info = self.openai_client.estimate_cost(prompt, 1)
+            # Estimate cost (quality/size-aware for gpt-image-2)
+            cost_info = self.openai_client.estimate_cost(
+                prompt,
+                1,
+                model=self.settings.images.default_model,
+                quality=quality,
+                size=size,
+            )
 
             # Add actual usage if available
             if hasattr(response, "usage") and response.usage:
