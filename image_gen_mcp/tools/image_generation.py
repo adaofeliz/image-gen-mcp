@@ -335,18 +335,11 @@ class ImageGenerationTool:
                 image_id, validated_params.get("output_format", output_format_str)
             )
 
-            # Encode image as base64 data URL for inline display
-            import base64
-
-            fmt = validated_params.get("output_format", output_format_str)
-            image_b64 = base64.b64encode(provider_response.image_data).decode()
-
             # Prepare result
             result = {
                 "task_id": task_id,
                 "image_id": image_id,
                 "image_url": image_url,
-                "image_data": f"data:image/{fmt};base64,{image_b64}",
                 "resource_uri": f"generated-images://{image_id}",
                 "metadata": {
                     "model": target_model,
