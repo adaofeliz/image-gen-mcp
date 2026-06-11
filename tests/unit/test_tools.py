@@ -691,19 +691,22 @@ class TestImageEditingTool:
     def test_missing_openai_provider_configuration(
         self, storage_manager, cache_manager
     ):
-        """Test that missing OpenAI provider configuration raises proper error."""
-        # Create settings with missing OpenAI provider
+        """Editing without OpenAI raises RuntimeError at edit time, not startup."""
         settings = Settings()
-        settings.providers = ProvidersSettings()  # Empty providers (no openai)
+        settings.providers = ProvidersSettings()
+
+        tool = ImageEditingTool(
+            storage_manager=storage_manager,
+            cache_manager=cache_manager,
+            settings=settings,
+            openai_client=None,
+        )
 
         with pytest.raises(
-            ValueError, match="OpenAI provider settings are required"
+            RuntimeError, match="Image editing requires an OpenAI provider"
         ):
-            ImageEditingTool(
-                storage_manager=storage_manager,
-                cache_manager=cache_manager,
-                settings=settings
-            )
+            import asyncio
+            asyncio.run(tool.edit(image_data="test", prompt="test"))
 
     def test_validate_openai_settings_helper_method(
         self, storage_manager, cache_manager, mock_openai_settings
