@@ -9,6 +9,7 @@ from ..config.settings import Settings
 from ..providers.base import ProviderConfig, ProviderError
 from ..providers.gemini import GeminiProvider
 from ..providers.openai import OpenAIProvider
+from ..providers.openrouter import OpenRouterProvider
 from ..providers.registry import ProviderRegistry
 from ..storage.manager import ImageStorageManager
 from ..types.enums import (
@@ -90,6 +91,33 @@ class ImageGenerationTool:
 
             except Exception as e:
                 logger.error(f"Failed to initialize Gemini provider: {e}")
+
+        # Initialize OpenRouter provider
+        openrouter_settings = getattr(self.settings.providers, "openrouter", None)
+        if (
+            openrouter_settings
+            and openrouter_settings.enabled
+            and openrouter_settings.api_key
+        ):
+            try:
+                custom_headers = {}
+                if openrouter_settings.app_name:
+                    custom_headers["X-Title"] = openrouter_settings.app_name
+                if openrouter_settings.app_url:
+                    custom_headers["HTTP-Referer"] = openrouter_settings.app_url
+                openrouter_config = ProviderConfig(
+                    api_key=openrouter_settings.api_key,
+                    base_url=openrouter_settings.base_url,
+                    timeout=openrouter_settings.timeout,
+                    max_retries=openrouter_settings.max_retries,
+                    enabled=openrouter_settings.enabled,
+                    custom_headers=custom_headers,
+                )
+                openrouter_provider = OpenRouterProvider(openrouter_config)
+                self._register_provider_async(openrouter_provider)
+                logger.info("OpenRouter provider initialized successfully")
+            except Exception as e:
+                logger.error(f"Failed to initialize OpenRouter provider: {e}")
 
     def _register_provider_async(self, provider) -> None:
         """Store provider for async registration later."""
