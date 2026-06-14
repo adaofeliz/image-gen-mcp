@@ -72,13 +72,15 @@ class TestSizeToAspectRatio:
 
 class TestParseBase64DataUrl:
     def test_valid_png(self):
-        result = _parse_base64_data_url(_SAMPLE_IMAGE_DATA_URL)
-        assert result == _SAMPLE_BYTES
+        result_bytes, result_fmt = _parse_base64_data_url(_SAMPLE_IMAGE_DATA_URL)
+        assert result_bytes == _SAMPLE_BYTES
+        assert result_fmt == "png"
 
     def test_valid_jpeg(self):
         url = f"data:image/jpeg;base64,{_SAMPLE_B64}"
-        result = _parse_base64_data_url(url)
-        assert result == _SAMPLE_BYTES
+        result_bytes, result_fmt = _parse_base64_data_url(url)
+        assert result_bytes == _SAMPLE_BYTES
+        assert result_fmt == "jpeg"
 
     def test_invalid_format_raises(self):
         with pytest.raises(ProviderError, match="Unexpected image URL format"):
@@ -224,6 +226,7 @@ class TestGenerateImage:
         )
         assert result.image_data == _SAMPLE_BYTES
         assert result.metadata["model"] == "gpt-5.4-image-2"
+        assert result.metadata["output_format"] == "png"
         assert result.metadata["usage"]["total_tokens"] == 2010
 
     @pytest.mark.asyncio
@@ -310,6 +313,16 @@ class TestEditImage:
         assert result.metadata["operation"] == "edit"
 
     @pytest.mark.asyncio
+    async def test_mask_data_rejected(self, provider: OpenRouterProvider):
+        with pytest.raises(ProviderError, match="Mask-based editing"):
+            await provider.edit_image(
+                model="gpt-5.4-image-2",
+                image_data=_SAMPLE_BYTES,
+                prompt="test",
+                mask_data=_SAMPLE_BYTES,
+            )
+
+    @pytest.mark.asyncio
     async def test_unsupported_model_raises(self, provider: OpenRouterProvider):
         with pytest.raises(ProviderError, match="not supported"):
             await provider.edit_image(
@@ -362,8 +375,9 @@ class TestHealthCheck:
         )
 
         result = await provider.check_health()
-        assert result["status"] == "degraded"
+        assert result["status"] == "healthy"
         assert "gpt-5-image" in result["models_available"]
+        assert "warning" in result
 
     @pytest.mark.asyncio
     async def test_unhealthy_no_models(self, provider: OpenRouterProvider):

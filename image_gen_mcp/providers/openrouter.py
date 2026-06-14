@@ -72,15 +72,15 @@ def _size_to_aspect_ratio(size: str) -> str | None:
     return _SIZE_TO_ASPECT_RATIO.get(normalized)
 
 
-def _parse_base64_data_url(url: str) -> bytes:
-    match = re.match(r"data:image/\w+;base64,(.+)", url)
+def _parse_base64_data_url(url: str) -> tuple[bytes, str]:
+    match = re.match(r"data:image/(\w+);base64,(.+)", url)
     if not match:
         raise ProviderError(
             f"Unexpected image URL format: {url[:60]}...",
             provider_name="openrouter",
             error_code="INVALID_RESPONSE",
         )
-    return base64.b64decode(match.group(1))
+    return base64.b64decode(match.group(2)), match.group(1)
 
 
 def _build_image_config(params: dict[str, Any]) -> dict[str, Any]:
@@ -261,14 +261,16 @@ class OpenRouterProvider(LLMProvider):
                 error_code="INVALID_RESPONSE",
             )
 
-        image_bytes = _parse_base64_data_url(images[0]["image_url"]["url"])
+        image_bytes, actual_format = _parse_base64_data_url(
+            images[0]["image_url"]["url"]
+        )
 
         metadata: dict[str, Any] = {
             "model": model,
             "prompt": prompt,
             "size": size,
             "quality": quality,
-            "output_format": output_format,
+            "output_format": actual_format,
             "provider": self.name,
             "created_at": data.get("created"),
         }
@@ -303,6 +305,13 @@ class OpenRouterProvider(LLMProvider):
                 f"Model '{model}' is not supported by OpenRouter provider",
                 provider_name=self.name,
                 error_code="UNSUPPORTED_MODEL",
+            )
+
+        if mask_data is not None:
+            raise ProviderError(
+                "Mask-based editing is not supported by the OpenRouter provider",
+                provider_name=self.name,
+                error_code="FEATURE_NOT_SUPPORTED",
             )
 
         slug = self._model_slug(model)
@@ -355,13 +364,15 @@ class OpenRouterProvider(LLMProvider):
                 error_code="INVALID_RESPONSE",
             )
 
-        image_bytes = _parse_base64_data_url(images[0]["image_url"]["url"])
+        image_bytes, actual_format = _parse_base64_data_url(
+            images[0]["image_url"]["url"]
+        )
 
         metadata: dict[str, Any] = {
             "model": model,
             "prompt": prompt,
             "size": size,
-            "output_format": output_format,
+            "output_format": actual_format,
             "provider": self.name,
             "operation": "edit",
             "created_at": data.get("created"),
@@ -398,13 +409,10 @@ class OpenRouterProvider(LLMProvider):
                 "error": "No configured image models available via OpenRouter",
                 "models_available": [],
             }
+        result: dict[str, Any] = {"status": "healthy", "models_available": available}
         if missing:
-            return {
-                "status": "degraded",
-                "error": f"Models not found: {', '.join(missing)}",
-                "models_available": available,
-            }
-        return {"status": "healthy", "models_available": available}
+            result["warning"] = f"Models not found: {', '.join(missing)}"
+        return result
 
     def estimate_cost(
         self,

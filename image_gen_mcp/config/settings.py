@@ -92,32 +92,6 @@ class OpenRouterSettings(BaseModel):
         return v.rstrip("/")
 
 
-class OpenRouterSettings(BaseModel):
-    """OpenRouter API configuration."""
-
-    api_key: str = Field(..., min_length=1, description="OpenRouter API key")
-    base_url: str = Field(
-        "https://openrouter.ai/api/v1",
-        description="OpenRouter API base URL",
-    )
-    timeout: float = Field(300.0, description="Request timeout in seconds")
-    max_retries: int = Field(3, description="Maximum number of retries")
-    enabled: bool = Field(False, description="Enable OpenRouter provider")
-    app_name: str | None = Field(
-        None, description="App name for X-Title header (rankings)"
-    )
-    app_url: str | None = Field(
-        None, description="App URL for HTTP-Referer header (rankings)"
-    )
-
-    @field_validator("base_url")
-    @classmethod
-    def validate_base_url(cls, v):
-        if not v.startswith(("http://", "https://")):
-            raise ValueError("Base URL must start with http:// or https://")
-        return v.rstrip("/")
-
-
 class ProvidersSettings(BaseModel):
     """Multi-provider configuration."""
 
