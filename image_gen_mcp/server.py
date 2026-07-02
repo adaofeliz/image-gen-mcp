@@ -974,24 +974,12 @@ async def get_prompt_template(
 # ===================================================================
 
 
-async def _generate_from_template(template_id: str, **kwargs) -> dict[str, Any]:
-    """Helper function to generate images from templates.
-
-    Args:
-        template_id: ID of the template to use
-        **kwargs: Template parameters
-
-    Returns:
-        Image generation result with template information
-    """
-    # Get server context
+async def _generate_from_template(template_id: str, **kwargs) -> str:
     ctx = mcp.get_context()
     server_ctx = get_server_context(ctx)
 
-    # Render the template
     prompt_text, metadata = template_manager.render_template(template_id, **kwargs)
 
-    # Generate the image with template information
     result = await server_ctx.image_generation_tool.generate(
         prompt=prompt_text,
         quality=metadata.get("quality", "high"),
@@ -999,11 +987,22 @@ async def _generate_from_template(template_id: str, **kwargs) -> dict[str, Any]:
         style=metadata.get("style", "vivid"),
     )
 
-    # Add template information
-    result["template_used"] = template_id
-    result["prompt_text"] = prompt_text
+    image_url = result.get("image_url", "")
+    image_id = result.get("image_id", "")
+    resource_uri = result.get("resource_uri", f"generated-images://{image_id}")
+    meta = result.get("metadata", {})
 
-    return result
+    return (
+        f"Image generated successfully!\n\n"
+        f"**Image URL:** {image_url}\n"
+        f"**Resource URI:** {resource_uri}\n"
+        f"**Image ID:** {image_id}\n"
+        f"**Prompt:** {prompt_text}\n"
+        f"**Model:** {meta.get('model', 'unknown')}\n"
+        f"**Size:** {meta.get('size', 'unknown')}\n"
+        f"**Format:** {meta.get('format', 'unknown')}\n"
+        f"**Template:** {template_id}\n"
+    )
 
 
 @mcp.prompt(

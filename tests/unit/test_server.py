@@ -6,6 +6,67 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from mcp.server.fastmcp.prompts.base import Message, UserMessage
+
+
+class TestGenerateFromTemplate:
+    """Verify _generate_from_template returns a str that FastMCP accepts as a prompt message."""
+
+    async def test_returns_str(self):
+        from image_gen_mcp.server import _generate_from_template, mcp
+
+        mock_ctx = MagicMock()
+        mock_server_ctx = MagicMock()
+        mock_tool = AsyncMock()
+        mock_tool.generate.return_value = {
+            "task_id": "t1",
+            "image_id": "img_test",
+            "image_url": "file:///tmp/img_test.png",
+            "resource_uri": "generated-images://img_test",
+            "metadata": {
+                "model": "gpt-5-image-mini",
+                "provider": "openrouter",
+                "size": "1024x1024",
+                "format": "PNG",
+            },
+        }
+        mock_server_ctx.image_generation_tool = mock_tool
+        mock_ctx.request_context.lifespan_context = mock_server_ctx
+
+        with patch.object(mcp, "get_context", return_value=mock_ctx):
+            result = await _generate_from_template("creative_image", subject="cat")
+
+        assert isinstance(result, str), "must return str so FastMCP wraps it as UserMessage"
+        assert "img_test" in result
+        assert "file:///tmp/img_test.png" in result
+        assert "generated-images://img_test" in result
+
+    async def test_result_is_valid_fastmcp_prompt_message(self):
+        from image_gen_mcp.server import _generate_from_template, mcp
+
+        mock_ctx = MagicMock()
+        mock_server_ctx = MagicMock()
+        mock_tool = AsyncMock()
+        mock_tool.generate.return_value = {
+            "task_id": "t2",
+            "image_id": "img_abc",
+            "image_url": "file:///tmp/img_abc.png",
+            "resource_uri": "generated-images://img_abc",
+            "metadata": {"model": "gpt-5-image-mini", "size": "1024x1024", "format": "PNG"},
+        }
+        mock_server_ctx.image_generation_tool = mock_tool
+        mock_ctx.request_context.lifespan_context = mock_server_ctx
+
+        with patch.object(mcp, "get_context", return_value=mock_ctx):
+            result = await _generate_from_template("creative_image", subject="dog")
+
+        assert isinstance(result, str)
+        msg = UserMessage(content=result)
+        assert isinstance(msg, Message)
+        assert msg.role == "user"
+        assert msg.content.type == "text"
+        assert "img_abc" in msg.content.text
+
 
 class TestHealthCheck:
     """Test the health_check tool function."""
