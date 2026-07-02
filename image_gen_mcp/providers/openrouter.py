@@ -80,7 +80,7 @@ def _parse_base64_data_url(url: str) -> tuple[bytes, str]:
             provider_name="openrouter",
             error_code="INVALID_RESPONSE",
         )
-    return base64.b64decode(match.group(2)), match.group(1)
+    return base64.b64decode(match.group(2)), match.group(1).lower()
 
 
 def _build_image_config(params: dict[str, Any]) -> dict[str, Any]:
@@ -91,7 +91,7 @@ def _build_image_config(params: dict[str, Any]) -> dict[str, Any]:
         if ratio:
             config["aspect_ratio"] = ratio
         else:
-            config["image_size"] = size
+            config["size"] = size
     for key in ("quality", "output_format", "background", "moderation"):
         val = params.get(key)
         if val and val != "auto":

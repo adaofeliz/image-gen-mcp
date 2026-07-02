@@ -101,9 +101,8 @@ class TestBuildImageConfig:
         assert config == {"aspect_ratio": "1:1"}
 
     def test_size_image_size_fallback(self):
-        # Unknown size passes through as image_size
         config = _build_image_config({"size": "2048x1152"})
-        assert config == {"image_size": "2048x1152"}
+        assert config == {"size": "2048x1152"}
 
     def test_quality_and_format(self):
         config = _build_image_config(
