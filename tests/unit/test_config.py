@@ -82,7 +82,7 @@ class TestOpenAISettings:
         assert settings.base_url == "https://api.openai.com/v1"
         assert settings.organization is None
         assert settings.max_retries == 3
-        assert settings.timeout == 30.0
+        assert settings.timeout == 300.0
 
     def test_openai_settings_custom_values(self):
         """Test OpenAI settings with custom values."""
