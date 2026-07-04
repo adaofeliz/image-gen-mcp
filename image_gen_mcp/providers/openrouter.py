@@ -1,8 +1,13 @@
-"""OpenRouter provider for image generation via chat completions API."""
+"""OpenRouter provider for image generation via the dedicated Images API.
+
+OpenRouter provides a dedicated image generation endpoint at POST /api/v1/images
+(launched June 2026). This provider targets that endpoint exclusively.
+
+Reference: https://openrouter.ai/docs/guides/overview/multimodal/image-generation
+"""
 
 import base64
 import logging
-import re
 from typing import Any
 
 import httpx
@@ -34,7 +39,7 @@ _GPT_54_IMAGE_2_CAPABILITY = dict(
     supported_sizes=["auto", "1024x1024", "1536x1024", "1024x1536", "3840x2160"],
     supported_qualities=["auto", "high", "medium", "low"],
     supported_formats=["png", "jpeg", "webp"],
-    max_images_per_request=1,
+    max_images_per_request=10,
     supports_style=False,
     supports_background=True,
     supports_compression=True,
@@ -47,7 +52,6 @@ _GPT_54_IMAGE_2_CAPABILITY = dict(
         "max_pixels": 8_294_400,
     },
     custom_parameters={
-        "moderation": ["auto", "low"],
         "background": ["auto", "transparent", "opaque"],
     },
 )
@@ -56,12 +60,11 @@ _GPT_IMAGE_CAPABILITY = dict(
     supported_sizes=["auto", "1024x1024", "1536x1024", "1024x1536"],
     supported_qualities=["auto", "high", "medium", "low"],
     supported_formats=["png", "jpeg", "webp"],
-    max_images_per_request=1,
+    max_images_per_request=10,
     supports_style=False,
     supports_background=True,
     supports_compression=True,
     custom_parameters={
-        "moderation": ["auto", "low"],
         "background": ["auto", "transparent", "opaque"],
     },
 )
@@ -72,64 +75,68 @@ def _size_to_aspect_ratio(size: str) -> str | None:
     return _SIZE_TO_ASPECT_RATIO.get(normalized)
 
 
-def _parse_base64_data_url(url: str) -> tuple[bytes, str]:
-    match = re.match(r"data:image/(\w+);base64,(.+)", url)
-    if not match:
-        raise ProviderError(
-            f"Unexpected image URL format: {url[:60]}...",
-            provider_name="openrouter",
-            error_code="INVALID_RESPONSE",
-        )
-    return base64.b64decode(match.group(2)), match.group(1).lower()
+def _build_request_body(
+    slug: str,
+    prompt: str,
+    quality: str,
+    size: str,
+    output_format: str,
+    compression: int,
+    background: str,
+    n: int,
+    input_references: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "model": slug,
+        "prompt": prompt,
+        "n": n,
+    }
 
-
-def _build_image_config(params: dict[str, Any]) -> dict[str, Any]:
-    config: dict[str, Any] = {}
-    size = params.get("size")
     if size and size != "auto":
         ratio = _size_to_aspect_ratio(size)
         if ratio:
-            config["aspect_ratio"] = ratio
+            body["aspect_ratio"] = ratio
         else:
-            config["size"] = size
-    for key in ("quality", "output_format", "background", "moderation"):
-        val = params.get(key)
-        if val and val != "auto":
-            config[key] = val
-    compression = params.get("compression", 100)
-    if compression < 100 and params.get("output_format") in ("jpeg", "webp"):
-        config["output_compression"] = compression
-    return config
+            body["size"] = size
+
+    if quality and quality != "auto":
+        body["quality"] = quality
+
+    if output_format and output_format != "auto":
+        body["output_format"] = output_format
+
+    if background and background != "auto":
+        body["background"] = background
+
+    if compression < 100 and output_format in ("jpeg", "webp"):
+        body["output_compression"] = compression
+
+    if input_references:
+        body["input_references"] = input_references
+
+    return body
 
 
-def _build_messages(
-    prompt: str,
-    image_data: str | bytes | None = None,
-) -> list[dict[str, Any]]:
-    if image_data is None:
-        return [{"role": "user", "content": prompt}]
-    if isinstance(image_data, bytes):
-        b64 = base64.b64encode(image_data).decode("ascii")
-        image_url = f"data:image/png;base64,{b64}"
-    else:
-        image_url = image_data
-    return [
-        {
-            "role": "user",
-            "content": [
-                {"type": "image_url", "image_url": {"url": image_url}},
-                {"type": "text", "text": prompt},
-            ],
-        }
-    ]
+def _image_bytes_from_response(
+    data: dict[str, Any], provider_name: str
+) -> tuple[bytes, str]:
+    images = data.get("data", [])
+    if not images or not images[0].get("b64_json"):
+        raise ProviderError(
+            "No image data in OpenRouter response",
+            provider_name=provider_name,
+            error_code="INVALID_RESPONSE",
+        )
+    raw = images[0]["b64_json"]
+    media_type = images[0].get("media_type", "image/png")
+    fmt = media_type.split("/")[-1].lower() if "/" in media_type else "png"
+    return base64.b64decode(raw), fmt
 
 
 class OpenRouterProvider(LLMProvider):
-    """OpenRouter provider for image generation via chat completions.
+    """OpenRouter provider — uses the dedicated Images API (POST /api/v1/images).
 
-    OpenRouter does not implement the OpenAI Images API. Instead, image
-    generation uses the chat completions endpoint with
-    ``modalities: ["image", "text"]`` and an ``image_config`` object.
+    Reference: https://openrouter.ai/docs/guides/overview/multimodal/image-generation
     """
 
     SUPPORTED_MODELS = {
@@ -211,29 +218,20 @@ class OpenRouterProvider(LLMProvider):
             )
 
         slug = self._model_slug(model)
-        image_config = _build_image_config(
-            {
-                "size": size,
-                "quality": quality,
-                "output_format": output_format,
-                "background": background,
-                "moderation": moderation,
-                "compression": compression,
-            }
+        body = _build_request_body(
+            slug=slug,
+            prompt=prompt,
+            quality=quality,
+            size=size,
+            output_format=output_format,
+            compression=compression,
+            background=background,
+            n=min(n, self.SUPPORTED_MODELS[model].max_images_per_request),
         )
-
-        body: dict[str, Any] = {
-            "model": slug,
-            "messages": _build_messages(prompt),
-            "modalities": ["image", "text"],
-            "stream": False,
-        }
-        if image_config:
-            body["image_config"] = image_config
 
         try:
             self._logger.info(f"Generating image with OpenRouter model {model}")
-            resp = await self._client.post("/chat/completions", json=body)
+            resp = await self._client.post("/images", json=body)
             resp.raise_for_status()
             data = resp.json()
         except httpx.HTTPStatusError as e:
@@ -249,21 +247,7 @@ class OpenRouterProvider(LLMProvider):
                 error_code="GENERATION_FAILED",
             ) from e
 
-        images = (
-            data.get("choices", [{}])[0]
-            .get("message", {})
-            .get("images", [])
-        )
-        if not images:
-            raise ProviderError(
-                "No images in OpenRouter response",
-                provider_name=self.name,
-                error_code="INVALID_RESPONSE",
-            )
-
-        image_bytes, actual_format = _parse_base64_data_url(
-            images[0]["image_url"]["url"]
-        )
+        image_bytes, actual_format = _image_bytes_from_response(data, self.name)
 
         metadata: dict[str, Any] = {
             "model": model,
@@ -281,10 +265,7 @@ class OpenRouterProvider(LLMProvider):
                 "output_tokens": data["usage"].get("completion_tokens"),
             }
 
-        return ImageResponse(
-            image_data=image_bytes,
-            metadata=metadata,
-        )
+        return ImageResponse(image_data=image_bytes, metadata=metadata)
 
     async def edit_image(
         self,
@@ -314,29 +295,32 @@ class OpenRouterProvider(LLMProvider):
                 error_code="FEATURE_NOT_SUPPORTED",
             )
 
-        slug = self._model_slug(model)
-        image_config = _build_image_config(
-            {
-                "size": size,
-                "quality": quality,
-                "output_format": output_format,
-                "background": background,
-                "compression": compression,
-            }
-        )
+        if isinstance(image_data, bytes):
+            b64 = base64.b64encode(image_data).decode("ascii")
+            image_url = f"data:image/png;base64,{b64}"
+        else:
+            image_url = image_data
 
-        body: dict[str, Any] = {
-            "model": slug,
-            "messages": _build_messages(prompt, image_data),
-            "modalities": ["image", "text"],
-            "stream": False,
-        }
-        if image_config:
-            body["image_config"] = image_config
+        input_references = [
+            {"type": "image_url", "image_url": {"url": image_url}}
+        ]
+
+        slug = self._model_slug(model)
+        body = _build_request_body(
+            slug=slug,
+            prompt=prompt,
+            quality=quality,
+            size=size,
+            output_format=output_format,
+            compression=compression,
+            background=background,
+            n=min(n, self.SUPPORTED_MODELS[model].max_images_per_request),
+            input_references=input_references,
+        )
 
         try:
             self._logger.info(f"Editing image with OpenRouter model {model}")
-            resp = await self._client.post("/chat/completions", json=body)
+            resp = await self._client.post("/images", json=body)
             resp.raise_for_status()
             data = resp.json()
         except httpx.HTTPStatusError as e:
@@ -352,21 +336,7 @@ class OpenRouterProvider(LLMProvider):
                 error_code="EDITING_FAILED",
             ) from e
 
-        images = (
-            data.get("choices", [{}])[0]
-            .get("message", {})
-            .get("images", [])
-        )
-        if not images:
-            raise ProviderError(
-                "No images in OpenRouter response",
-                provider_name=self.name,
-                error_code="INVALID_RESPONSE",
-            )
-
-        image_bytes, actual_format = _parse_base64_data_url(
-            images[0]["image_url"]["url"]
-        )
+        image_bytes, actual_format = _image_bytes_from_response(data, self.name)
 
         metadata: dict[str, Any] = {
             "model": model,
@@ -378,16 +348,11 @@ class OpenRouterProvider(LLMProvider):
             "created_at": data.get("created"),
         }
 
-        return ImageResponse(
-            image_data=image_bytes,
-            metadata=metadata,
-        )
+        return ImageResponse(image_data=image_bytes, metadata=metadata)
 
     async def check_health(self) -> dict[str, Any]:
         try:
-            resp = await self._client.get(
-                "/models", params={"output_modalities": "image"}
-            )
+            resp = await self._client.get("/images/models")
             resp.raise_for_status()
             models_data = resp.json().get("data", [])
             api_ids = {m["id"] for m in models_data if isinstance(m, dict)}

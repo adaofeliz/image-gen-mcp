@@ -808,7 +808,9 @@ class TestActualFormatPropagation:
         )
         mock_provider.estimate_cost.return_value = {"estimated_cost_usd": 0.0}
 
-        tool.provider_registry.get_provider_for_model = MagicMock(return_value=mock_provider)
+        tool.provider_registry.get_provider_for_model = MagicMock(
+            return_value=mock_provider
+        )
         tool.provider_registry.validate_model_request = MagicMock(
             return_value={
                 "quality": "auto",
@@ -821,11 +823,14 @@ class TestActualFormatPropagation:
             }
         )
 
-        result = await tool.generate(prompt="test", model="gpt-5-image-mini", output_format="jpeg")
+        result = await tool.generate(
+            prompt="test", model="gpt-5-image-mini", output_format="jpeg"
+        )
 
         _, save_kwargs = save_image_mock.call_args
         assert save_kwargs["file_format"] == "png", (
-            "save_image must use the actual format from provider metadata, not the requested 'jpeg'"
+            "save_image must use actual format from provider metadata,"
+            " not the requested 'jpeg'"
         )
         assert result["metadata"]["output_format"] == "png"
         assert result["metadata"]["format"] == "PNG"
