@@ -1,4 +1,4 @@
-"""Unit tests for OpenRouter provider."""
+"""Unit tests for OpenRouter provider (dedicated Images API)."""
 
 import base64
 
@@ -7,43 +7,31 @@ import pytest
 from image_gen_mcp.providers.base import ProviderConfig, ProviderError
 from image_gen_mcp.providers.openrouter import (
     OpenRouterProvider,
-    _build_image_config,
-    _build_messages,
-    _parse_base64_data_url,
+    _build_request_body,
+    _image_bytes_from_response,
     _size_to_aspect_ratio,
 )
 
 _SAMPLE_B64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAA"
+    "DUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 )
 _SAMPLE_IMAGE_DATA_URL = f"data:image/png;base64,{_SAMPLE_B64}"
 _SAMPLE_BYTES = base64.b64decode(_SAMPLE_B64)
 
 
-def _fake_image_response(model_slug: str, image_data_url: str) -> dict:
+def _fake_images_response(b64: str, media_type: str | None = None) -> dict:
+    item: dict = {"b64_json": b64}
+    if media_type:
+        item["media_type"] = media_type
     return {
-        "id": "chatcmpl-123",
-        "model": model_slug,
-        "choices": [
-            {
-                "message": {
-                    "role": "assistant",
-                    "content": "Here is your image.",
-                    "images": [
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": image_data_url},
-                        }
-                    ],
-                }
-            }
-        ],
+        "created": 1700000000,
+        "data": [item],
         "usage": {
             "prompt_tokens": 10,
             "completion_tokens": 2000,
             "total_tokens": 2010,
         },
-        "created": 1700000000,
     }
 
 
@@ -70,78 +58,151 @@ class TestSizeToAspectRatio:
         assert _size_to_aspect_ratio("") is None
 
 
-class TestParseBase64DataUrl:
+class TestImageBytesFromResponse:
     def test_valid_png(self):
-        result_bytes, result_fmt = _parse_base64_data_url(_SAMPLE_IMAGE_DATA_URL)
-        assert result_bytes == _SAMPLE_BYTES
-        assert result_fmt == "png"
+        data = _fake_images_response(_SAMPLE_B64)
+        image_bytes, fmt = _image_bytes_from_response(data, "openrouter")
+        assert image_bytes == _SAMPLE_BYTES
+        assert fmt == "png"
 
-    def test_valid_jpeg(self):
-        url = f"data:image/jpeg;base64,{_SAMPLE_B64}"
-        result_bytes, result_fmt = _parse_base64_data_url(url)
-        assert result_bytes == _SAMPLE_BYTES
-        assert result_fmt == "jpeg"
+    def test_explicit_media_type_jpeg(self):
+        data = _fake_images_response(_SAMPLE_B64, media_type="image/jpeg")
+        _, fmt = _image_bytes_from_response(data, "openrouter")
+        assert fmt == "jpeg"
 
-    def test_invalid_format_raises(self):
-        with pytest.raises(ProviderError, match="Unexpected image URL format"):
-            _parse_base64_data_url("not-a-data-url")
+    def test_svg_media_type(self):
+        data = _fake_images_response(_SAMPLE_B64, media_type="image/svg+xml")
+        _, fmt = _image_bytes_from_response(data, "openrouter")
+        assert fmt == "svg+xml"
+
+    def test_empty_data_raises(self):
+        with pytest.raises(ProviderError, match="No image data"):
+            _image_bytes_from_response({"data": []}, "openrouter")
+
+    def test_missing_b64_raises(self):
+        with pytest.raises(ProviderError, match="No image data"):
+            _image_bytes_from_response(
+                {"data": [{"b64_json": None}]}, "openrouter"
+            )
 
 
-class TestBuildImageConfig:
-    def test_empty_params(self):
-        assert _build_image_config({}) == {}
+class TestBuildRequestBody:
+    def test_minimal(self):
+        body = _build_request_body(
+            slug="openai/gpt-5-image",
+            prompt="a sunset",
+            quality="auto",
+            size="auto",
+            output_format="auto",
+            compression=100,
+            background="auto",
+            n=1,
+        )
+        assert body["model"] == "openai/gpt-5-image"
+        assert body["prompt"] == "a sunset"
+        assert body["n"] == 1
+        assert "aspect_ratio" not in body
+        assert "size" not in body
+        assert "quality" not in body
+        assert "output_format" not in body
+        assert "background" not in body
+        assert "output_compression" not in body
 
-    def test_auto_values_skipped(self):
-        assert _build_image_config(
-            {"size": "auto", "quality": "auto", "background": "auto"}
-        ) == {}
+    def test_known_size_becomes_aspect_ratio(self):
+        body = _build_request_body(
+            slug="openai/gpt-5-image",
+            prompt="test",
+            quality="auto",
+            size="1024x1024",
+            output_format="auto",
+            compression=100,
+            background="auto",
+            n=1,
+        )
+        assert body["aspect_ratio"] == "1:1"
+        assert "size" not in body
 
-    def test_size_aspect_ratio(self):
-        config = _build_image_config({"size": "1024x1024"})
-        assert config == {"aspect_ratio": "1:1"}
-
-    def test_size_image_size_fallback(self):
-        config = _build_image_config({"size": "2048x1152"})
-        assert config == {"size": "2048x1152"}
+    def test_unknown_size_passes_as_size(self):
+        body = _build_request_body(
+            slug="openai/gpt-5-image",
+            prompt="test",
+            quality="auto",
+            size="2048x1152",
+            output_format="auto",
+            compression=100,
+            background="auto",
+            n=1,
+        )
+        assert body["size"] == "2048x1152"
+        assert "aspect_ratio" not in body
 
     def test_quality_and_format(self):
-        config = _build_image_config(
-            {"quality": "high", "output_format": "jpeg"}
+        body = _build_request_body(
+            slug="openai/gpt-5-image",
+            prompt="test",
+            quality="high",
+            size="auto",
+            output_format="jpeg",
+            compression=100,
+            background="auto",
+            n=1,
         )
-        assert config["quality"] == "high"
-        assert config["output_format"] == "jpeg"
+        assert body["quality"] == "high"
+        assert body["output_format"] == "jpeg"
 
     def test_compression_for_lossy(self):
-        config = _build_image_config(
-            {"output_format": "jpeg", "compression": 80}
+        body = _build_request_body(
+            slug="openai/gpt-5-image",
+            prompt="test",
+            quality="auto",
+            size="auto",
+            output_format="jpeg",
+            compression=80,
+            background="auto",
+            n=1,
         )
-        assert config["output_compression"] == 80
+        assert body["output_compression"] == 80
 
     def test_compression_100_skipped(self):
-        config = _build_image_config(
-            {"output_format": "jpeg", "compression": 100}
+        body = _build_request_body(
+            slug="openai/gpt-5-image",
+            prompt="test",
+            quality="auto",
+            size="auto",
+            output_format="jpeg",
+            compression=100,
+            background="auto",
+            n=1,
         )
-        assert "output_compression" not in config
+        assert "output_compression" not in body
 
+    def test_background_non_auto(self):
+        body = _build_request_body(
+            slug="openai/gpt-5-image",
+            prompt="test",
+            quality="auto",
+            size="auto",
+            output_format="png",
+            compression=100,
+            background="transparent",
+            n=1,
+        )
+        assert body["background"] == "transparent"
 
-class TestBuildMessages:
-    def test_text_only(self):
-        messages = _build_messages("a sunset")
-        assert messages == [{"role": "user", "content": "a sunset"}]
-
-    def test_with_image_bytes(self):
-        messages = _build_messages("edit this", _SAMPLE_BYTES)
-        assert messages[0]["role"] == "user"
-        content = messages[0]["content"]
-        assert len(content) == 2
-        assert content[0]["type"] == "image_url"
-        assert content[0]["image_url"]["url"].startswith("data:image/png;base64,")
-        assert content[1] == {"type": "text", "text": "edit this"}
-
-    def test_with_image_data_url(self):
-        messages = _build_messages("edit this", _SAMPLE_IMAGE_DATA_URL)
-        content = messages[0]["content"]
-        assert content[0]["image_url"]["url"] == _SAMPLE_IMAGE_DATA_URL
+    def test_input_references(self):
+        refs = [{"type": "image_url", "image_url": {"url": "https://example.com/img.jpg"}}]
+        body = _build_request_body(
+            slug="openai/gpt-5-image",
+            prompt="edit this",
+            quality="auto",
+            size="auto",
+            output_format="png",
+            compression=100,
+            background="auto",
+            n=1,
+            input_references=refs,
+        )
+        assert body["input_references"] == refs
 
 
 class TestProviderInit:
@@ -186,11 +247,13 @@ class TestModelRegistration:
         assert cap.size_constraints is not None
         assert cap.size_constraints["max_edge"] == 3840
         assert "3840x2160" in cap.supported_sizes
+        assert cap.max_images_per_request == 10
 
     def test_gpt_5_image_capabilities(self):
         cap = OpenRouterProvider.SUPPORTED_MODELS["gpt-5-image"]
         assert cap.supports_custom_sizes is False
         assert "auto" in cap.supported_sizes
+        assert cap.max_images_per_request == 10
 
     def test_model_slug_raises_for_unknown(self, provider):
         with pytest.raises(ProviderError, match="not supported"):
@@ -202,16 +265,22 @@ class TestGenerateImage:
     async def test_successful_generation(self, provider: OpenRouterProvider):
         import httpx
 
-        transport = httpx.MockTransport(
-            lambda req: httpx.Response(
-                200,
-                json=_fake_image_response(
-                    "openai/gpt-5.4-image-2", _SAMPLE_IMAGE_DATA_URL
-                ),
+        def handler(req):
+            assert req.url.path.endswith("/images")
+            body = req.content
+            import json
+            parsed = json.loads(body)
+            assert parsed["model"] == "openai/gpt-5.4-image-2"
+            assert parsed["prompt"] == "a sunset"
+            assert "messages" not in parsed
+            assert "modalities" not in parsed
+            assert "image_config" not in parsed
+            return httpx.Response(
+                200, json=_fake_images_response(_SAMPLE_B64)
             )
-        )
+
         provider._client = httpx.AsyncClient(
-            transport=transport,
+            transport=httpx.MockTransport(handler),
             base_url=provider._base_url,
             headers=provider._client.headers,
         )
@@ -234,24 +303,11 @@ class TestGenerateImage:
             await provider.generate_image(model="dall-e-3", prompt="test")
 
     @pytest.mark.asyncio
-    async def test_no_images_in_response(self, provider: OpenRouterProvider):
+    async def test_no_image_data_in_response(self, provider: OpenRouterProvider):
         import httpx
 
         transport = httpx.MockTransport(
-            lambda req: httpx.Response(
-                200,
-                json={
-                    "choices": [
-                        {
-                            "message": {
-                                "role": "assistant",
-                                "content": "No image.",
-                                "images": [],
-                            }
-                        }
-                    ]
-                },
-            )
+            lambda req: httpx.Response(200, json={"data": []})
         )
         provider._client = httpx.AsyncClient(
             transport=transport,
@@ -259,7 +315,7 @@ class TestGenerateImage:
             headers=provider._client.headers,
         )
 
-        with pytest.raises(ProviderError, match="No images"):
+        with pytest.raises(ProviderError, match="No image data"):
             await provider.generate_image(
                 model="gpt-5-image", prompt="test"
             )
@@ -282,22 +338,57 @@ class TestGenerateImage:
                 model="gpt-5-image", prompt="test"
             )
 
+    @pytest.mark.asyncio
+    async def test_size_translates_to_aspect_ratio(
+        self, provider: OpenRouterProvider
+    ):
+        import json
+
+        import httpx
+
+        captured: list[dict] = []
+
+        def handler(req):
+            captured.append(json.loads(req.content))
+            return httpx.Response(200, json=_fake_images_response(_SAMPLE_B64))
+
+        provider._client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url=provider._base_url,
+            headers=provider._client.headers,
+        )
+
+        await provider.generate_image(
+            model="gpt-5-image", prompt="test", size="1024x1024"
+        )
+        assert captured[0].get("aspect_ratio") == "1:1"
+        assert "size" not in captured[0]
+
 
 class TestEditImage:
     @pytest.mark.asyncio
-    async def test_successful_edit(self, provider: OpenRouterProvider):
+    async def test_successful_edit_with_input_references(
+        self, provider: OpenRouterProvider
+    ):
+        import json
+
         import httpx
 
-        transport = httpx.MockTransport(
-            lambda req: httpx.Response(
+        captured: list[dict] = []
+
+        def handler(req):
+            assert req.url.path.endswith("/images")
+            captured.append(json.loads(req.content))
+            return httpx.Response(
                 200,
-                json=_fake_image_response(
-                    "openai/gpt-5.4-image-2", _SAMPLE_IMAGE_DATA_URL
-                ),
+                json={
+                    "created": 1700000000,
+                    "data": [{"b64_json": _SAMPLE_B64}],
+                },
             )
-        )
+
         provider._client = httpx.AsyncClient(
-            transport=transport,
+            transport=httpx.MockTransport(handler),
             base_url=provider._base_url,
             headers=provider._client.headers,
         )
@@ -310,6 +401,45 @@ class TestEditImage:
         )
         assert result.image_data == _SAMPLE_BYTES
         assert result.metadata["operation"] == "edit"
+        body = captured[0]
+        assert "messages" not in body
+        assert "modalities" not in body
+        refs = body.get("input_references", [])
+        assert len(refs) == 1
+        assert refs[0]["type"] == "image_url"
+        assert refs[0]["image_url"]["url"].startswith("data:image/png;base64,")
+
+    @pytest.mark.asyncio
+    async def test_edit_with_data_url_image(self, provider: OpenRouterProvider):
+        import json
+
+        import httpx
+
+        captured: list[dict] = []
+
+        def handler(req):
+            captured.append(json.loads(req.content))
+            return httpx.Response(
+                200,
+                json={
+                    "created": 1700000000,
+                    "data": [{"b64_json": _SAMPLE_B64}],
+                },
+            )
+
+        provider._client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+            base_url=provider._base_url,
+            headers=provider._client.headers,
+        )
+
+        await provider.edit_image(
+            model="gpt-5.4-image-2",
+            image_data=_SAMPLE_IMAGE_DATA_URL,
+            prompt="edit this",
+        )
+        refs = captured[0].get("input_references", [])
+        assert refs[0]["image_url"]["url"] == _SAMPLE_IMAGE_DATA_URL
 
     @pytest.mark.asyncio
     async def test_mask_data_rejected(self, provider: OpenRouterProvider):
@@ -337,6 +467,7 @@ class TestHealthCheck:
         import httpx
 
         def handler(req):
+            assert req.url.path.endswith("/images/models")
             return httpx.Response(
                 200,
                 json={
@@ -357,9 +488,12 @@ class TestHealthCheck:
         result = await provider.check_health()
         assert result["status"] == "healthy"
         assert "gpt-5.4-image-2" in result["models_available"]
+        assert "warning" not in result
 
     @pytest.mark.asyncio
-    async def test_degraded_missing_models(self, provider: OpenRouterProvider):
+    async def test_partial_models_still_healthy_with_warning(
+        self, provider: OpenRouterProvider
+    ):
         import httpx
 
         transport = httpx.MockTransport(
@@ -423,4 +557,4 @@ class TestClose:
     @pytest.mark.asyncio
     async def test_close_is_idempotent(self, provider: OpenRouterProvider):
         await provider.close()
-        await provider.close()  # should not raise
+        await provider.close()
